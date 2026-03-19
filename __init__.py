@@ -1,43 +1,114 @@
-from re import T
-from .api.utils import Hitem3dAPI
+from __future__ import annotations
+
 import os
 import json
 import torch
-import requests
 from PIL import Image
+from typing_extensions import override
+import folder_paths
 from folder_paths import get_output_directory, get_input_directory
+from comfy_api.latest import ComfyExtension, io
+
+from .api.utils import Hitem3dAPI
+from comfy_api_nodes.util import (
+    download_url_to_file_3d,
+)
+
 __version__ = "1.0.0"
+
 hitems3d_ak = os.environ.get("hitems3d_ak")
 hitems3d_sk = os.environ.get("hitems3d_sk")
-if not hitems3d_ak:
+
+if not hitems3d_ak or not hitems3d_sk:
     p = os.path.dirname(os.path.realpath(__file__))
-    with open(os.path.join(p, 'config.json')) as f:
-        config = json.load(f)
-        hitems3d_ak = config["hitems3d_ak"]
-if not hitems3d_sk:
-    p = os.path.dirname(os.path.realpath(__file__))
-    with open(os.path.join(p, 'config.json')) as f:
-        config = json.load(f)
-        hitems3d_sk = config["hitems3d_sk"]        
+    config_path = os.path.join(p, "config.json")
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            config = json.load(f)
+            if not hitems3d_ak:
+                hitems3d_ak = config.get("hitems3d_ak")
+            if not hitems3d_sk:
+                hitems3d_sk = config.get("hitems3d_sk")
+
+# ── 常量 ──────────────────────────────────────────────────────────────
+
+IMAGE_TO_3D_SCENE_MODELS = {
+    "general": ["hitem3dv1.5", "hitem3dv2.0"],
+    "portrait": ["scene-portraitv1.5", "scene-portraitv2.0", "scene-portraitv2.1"],
+}
+
+IMAGE_TO_3D_MODEL_RESOLUTIONS = {
+    "hitem3dv1.5": ["512", "1024", "1536", "1536pro"],
+    "hitem3dv2.0": ["1536", "1536pro"],
+    "scene-portraitv1.5": ["1536"],
+    "scene-portraitv2.0": ["1536pro"],
+    "scene-portraitv2.1": ["1536pro"],
+}
+
+ALL_IMAGE_TO_3D_MODELS = [
+    "hitem3dv1.5",
+    "hitem3dv2.0",
+    "scene-portraitv1.5",
+    "scene-portraitv2.0",
+    "scene-portraitv2.1",
+]
+
+ALL_IMAGE_TO_3D_RESOLUTIONS = ["512", "1024", "1536", "1536pro"]
+
+
+
+ALL_FORMATS = ["glb", "stl", "fbx", "usdz"]
+
+Hitems3DModelTask = io.Custom("HITMES3D_MODEL_TASK")
+
+# ── 工具函数 ───────────────────────────────────────────────────────────
+
+
 def getHitem3dAPI(ak: str, sk: str):
     ak = hitems3d_ak if hitems3d_ak else ak
     sk = hitems3d_sk if hitems3d_sk else sk
     if not ak:
         raise RuntimeError("ak is required")
     if not sk:
-        raise RuntimeError("sk is required")     
+        raise RuntimeError("sk is required")
     return Hitem3dAPI(ak, sk), ak, sk
-def convert_format(format):
-    FORMAT_MAPPING = {
-        "glb": 2,
-        "stl": 3,
-        "fbx": 4,
-        "usdz": 5
-    }
-    if format in FORMAT_MAPPING:
-      return FORMAT_MAPPING[format]
-    else:
-      raise 2
+
+
+def get_default_model_for_scene(scene):
+    return IMAGE_TO_3D_SCENE_MODELS[scene][0]
+
+
+def infer_scene_from_model(model):
+    for scene, models in IMAGE_TO_3D_SCENE_MODELS.items():
+        if model in models:
+            return scene
+    return None
+
+
+def validate_image_to_3d_options(scene, model, resolution):
+    allowed_models = IMAGE_TO_3D_SCENE_MODELS.get(scene)
+    if allowed_models is None:
+        valid_scenes = ", ".join(IMAGE_TO_3D_SCENE_MODELS.keys())
+        raise RuntimeError(f"Invalid scene '{scene}'. Valid scenes: {valid_scenes}")
+
+    if model not in allowed_models:
+        allowed_models_text = ", ".join(allowed_models)
+        raise RuntimeError(
+            f"Model '{model}' is not available for scene '{scene}'. "
+            f"Allowed models: {allowed_models_text}"
+        )
+
+    allowed_resolutions = IMAGE_TO_3D_MODEL_RESOLUTIONS[model]
+    if resolution not in allowed_resolutions:
+        allowed_resolutions_text = ", ".join(allowed_resolutions)
+        raise RuntimeError(
+            f"Resolution '{resolution}' is not available for model '{model}'. "
+            f"Allowed resolutions: {allowed_resolutions_text}"
+        )
+
+
+
+
 def save_tensor(image_tensor, filename):
     if image_tensor.dim() > 3:
         image_tensor = image_tensor[0]
@@ -57,241 +128,328 @@ def save_tensor(image_tensor, filename):
     else:
         name = filename + ".jpg"
         image_pil.save(name, "JPEG")
-    return name    
-def toImagePath(image,filename):
+    return name
+
+
+def toImagePath(image, filename):
     if image is None:
-        raise None
+        return None
     if not isinstance(image, (str, bytes, os.PathLike)):
-        image_path = save_tensor(image, os.path.join(get_input_directory(), filename))
+        return save_tensor(image, os.path.join(get_input_directory(), filename))
+    return image
+
+
+def build_multi_view_payload(image_path, image_back=None, image_left=None, image_right=None):
+    multi_images = [image_path]
+    image_dict = {
+        "image_back": image_back,
+        "image_left": image_left,
+        "image_right": image_right,
+    }
+    multi_images_bit = "1"
+    for image_name in ["image_back", "image_left", "image_right"]:
+        img = image_dict[image_name]
+        if img is not None:
+            image_filename = toImagePath(img, image_name)
+            multi_images.append(image_filename)
+            multi_images_bit += "1"
+        else:
+            multi_images_bit += "0"
+            multi_images.append(None)
+    return multi_images, multi_images_bit
+
+
+async def run_image_to_3d_task(
+    ak, sk, texture, scene,
+    image=None, image_back=None, image_left=None, image_right=None,
+    model=None, face=None, resolution=None,
+):
+    if image is None:
+        raise RuntimeError("image is required")
+
+    if not scene:
+        scene = infer_scene_from_model(model) or "general"
+    if not model:
+        model = get_default_model_for_scene(scene)
+    if not resolution:
+        resolution = IMAGE_TO_3D_MODEL_RESOLUTIONS[model][0]
+
+    validate_image_to_3d_options(scene, model, resolution)
+    request_type = 3 if texture else 1
+    image_path = toImagePath(image, "image")
+    api, ak, sk = getHitem3dAPI(ak, sk)
+
+    if image_back is None and image_left is None and image_right is None:
+        result = await api.image_to_3d(
+            image_path, request_type, face, model, resolution
+        )
     else:
-        image_path = image   
-    return image_path     
-def download_model(url,task_id):
-    print("downloading model from", url)
-    response = requests.get(url)
-    if response.status_code == 200:
-        subfolder = get_output_directory()
-        model_url = url
-        # 去掉查询参数
-        q_index = model_url.find('?')
-        if q_index > 0:
-            model_url = model_url[:q_index]
-        # 提取文件名
-        slash_index = model_url.rfind('/')
-        if slash_index >= 0:
-            file = task_id+"-"+ model_url[slash_index + 1:]
-        out_path = os.path.join(subfolder, file)
-        with open(out_path, "wb") as f:
-            f.write(response.content)
-        print("model downloaded to", out_path)    
-        return out_path;
-    else:
-        raise RuntimeError(f"Failed to download model: {response.status_code}")
-class ImageTo3DNode:
-    DESCRIPTION = "Generates a 3D model from a single or multi-view image. Supports hitem3dv1.5 / hitem3dv2.0 models with customizable resolution, face count, and output format."
+        multi_images, multi_images_bit = build_multi_view_payload(
+            image_path, image_back=image_back, image_left=image_left, image_right=image_right
+        )
+        result = await api.multi_view_to_3d(
+            multi_images, multi_images_bit, request_type, face, model, resolution
+        )
+
+    if result["status"] != "success":
+        raise RuntimeError(f"Failed to generate mesh: {result['message']}")
+    task_id = result["task_id"]
+    model_url = result["model_url"]
+    glb = await download_url_to_file_3d(model_url, "glb", task_id=task_id)
+
+    return glb, {"task_id": task_id, "model_url": model_url, "ak": ak, "sk": sk}
+
+
+# ── 节点定义 ───────────────────────────────────────────────────────────
+
+class ImageTo3DNode(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="ImageTo3DNode",
+            display_name="hi3d:ImageTo3D",
+            category="Hitems3D",
+            description=(
+                "Generates a 3D model from a single or multi-view image. "
+                "Use `scene` to switch between general object models and portrait/scene models. "
+                "Model and resolution options are linked together in the node UI."
+            ),
+            inputs=[
+                io.String.Input(
+                    "ak", default="",
+                    tooltip="Hitem3D API Access Key. Leave empty if configured in config.json or environment variables.",
+                ),
+                io.String.Input(
+                    "sk", default="",
+                    tooltip="Hitem3D API Secret Key. Leave empty if configured in config.json or environment variables.",
+                ),
+                io.Image.Input(
+                    "image", optional=True,
+                    tooltip="Main front image (Required) for 3D model generation.",
+                ),
+                io.Image.Input(
+                    "image_back", optional=True,
+                    tooltip="Back reference image (Optional) for multi-view 3D reconstruction.",
+                ),
+                io.Image.Input(
+                    "image_left", optional=True,
+                    tooltip="Left reference image (Optional) for multi-view 3D reconstruction.",
+                ),
+                io.Image.Input(
+                    "image_right", optional=True,
+                    tooltip="Right reference image (Optional) for multi-view 3D reconstruction.",
+                ),
+                io.Boolean.Input(
+                    "texture", default=False, optional=True,
+                    tooltip="Whether to generate textures. If enabled, the model will include vertex colors/textures.",
+                ),
+                io.Combo.Input(
+                    "scene", options=["general", "portrait"], default="general", optional=True,
+                    tooltip="Scene preset. `general` is for common objects, `portrait` is for portrait/scene generation.",
+                ),
+                io.Combo.Input(
+                    "model", options=ALL_IMAGE_TO_3D_MODELS, default="hitem3dv1.5", optional=True,
+                    tooltip="3D generation model version. The node UI filters valid versions according to the selected scene.",
+                ),
+                io.Combo.Input(
+                    "resolution", options=ALL_IMAGE_TO_3D_RESOLUTIONS, default="1024", optional=True,
+                    tooltip="Generation resolution. The node UI filters valid resolutions according to the selected model.",
+                ),
+                io.Int.Input(
+                    "face", min=100000, max=2000000, default=500000, optional=True,
+                    tooltip="Output poly count. Higher count means finer detail but larger file size.",
+                ),
+            ],
+            outputs=[
+                io.File3DGLB.Output(
+                    display_name="GLB",
+                ),
+                Hitems3DModelTask.Output(
+                    display_name="model_task",
+                    tooltip="Task information to be passed to the Texture node for re-texturing",
+                ),
+            ],
+        )
 
     @classmethod
-    def INPUT_TYPES(s):
-        config = {
-            "required": {
-                "ak": ("STRING", {"default": "", "tooltip": "Hitem3D API Access Key. Leave empty if configured in config.json or environment variables."}),
-                "sk": ("STRING", {"default": "", "tooltip": "Hitem3D API Secret Key. Leave empty if configured in config.json or environment variables."}),
-            },
-            "optional": {
-                "image": ("IMAGE", {"tooltip": "Main front image (Required) for 3D model generation."}),
-                "image_back": ("IMAGE", {"tooltip": "Back reference image (Optional) for multi-view 3D reconstruction."}),
-                "image_left": ("IMAGE", {"tooltip": "Left reference image (Optional) for multi-view 3D reconstruction."}),
-                "image_right": ("IMAGE", {"tooltip": "Right reference image (Optional) for multi-view 3D reconstruction."}),
-                "texture": ("BOOLEAN", {"default": True, "tooltip": "Whether to generate textures. If enabled, the model will include vertex colors/textures."}),
-                "model": (["hitem3dv1.5", "hitem3dv2.0"], {"default": "hitem3dv1.5", "tooltip": "3D generation model version. v2.0 provides better quality but takes longer."}),
-                "resolution": (["512", "1024", "1536", "1536pro"], {"default": "1024", "tooltip": "Generation resolution. Higher resolution provides more detail but takes more time."}),
-                "face": ("INT", {"min": 100000, "max": 2000000, "default": 500000, "tooltip": "Output poly count. Higher count means finer detail but larger file size."}),
-                "format": ([ "glb", "stl","fbx","usdz"], {"default": "glb", "tooltip": "Output 3D model file format."}),
-            }
-        }
-        return config
+    async def execute(
+        cls, ak, sk,
+        image=None, image_back=None, image_left=None, image_right=None,
+        texture=False, scene="general", model=None, resolution=None,
+        face=500000,
+    ):
+        glb, task_info = await run_image_to_3d_task(
+            ak, sk, texture, scene,
+            image=image, image_back=image_back,
+            image_left=image_left, image_right=image_right,
+            model=model, face=face, resolution=resolution,
+        )
+        return io.NodeOutput(glb, task_info)
 
-    RETURN_TYPES = ("STRING", "HITMES3D_MODEL_TASK",)
-    RETURN_NAMES = ("model_file", "model_task")
-    OUTPUT_TOOLTIPS = ("Local path to the downloaded 3D model file", "Task information to be passed to the Texture node for re-texturing")
-    FUNCTION = "generate_mesh"
-    CATEGORY = "Hitems3D"
 
-    async def generate_mesh(self, ak, sk, texture, image=None, image_back=None, image_left=None, image_right=None, model=None, face=None, format=None, resolution=None):
+class TextrueNode(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="TextrueNode",
+            display_name="hi3d:Textrue",
+            category="Hitems3D",
+            description=(
+                "Regenerates texture maps for existing 3D models. "
+                "Provide a reference image and the original model (via path/URL or upstream node) "
+                "to generate new textures."
+            ),
+            inputs=[
+                io.String.Input(
+                    "ak", default="",
+                    tooltip="Hitem3D API Access Key. Leave empty if configured in config.json or environment variables.",
+                ),
+                io.String.Input(
+                    "sk", default="",
+                    tooltip="Hitem3D API Secret Key. Leave empty if configured in config.json or environment variables.",
+                ),
+                io.MultiType.Input(
+                    "GLB",
+                    types=[io.File3DGLB, io.File3DAny],
+                    optional=True,
+                    tooltip="Input 3D model in GLB format. Either this or model_task is required.",
+                ),
+                io.Image.Input(
+                    "image", optional=True,
+                    tooltip="Texture reference image (Required). The model will generate a new texture map based on this image.",
+                ),
+                Hitems3DModelTask.Input(
+                    "model_task", optional=True,
+                    tooltip="Task output from ImageTo3D nodes. Automatically uses that model's URL if connected.",
+                ),
+                io.Combo.Input(
+                    "model", options=["hitem3dv1.5", "scene-portraitv1.5"],
+                    default="hitem3dv1.5", optional=True,
+                    tooltip="Model version used for texture generation.",
+                ),
+
+            ],
+            outputs=[
+                io.File3DGLB.Output(
+                    display_name="GLB",
+                ),
+                Hitems3DModelTask.Output(
+                    display_name="model_task",
+                    tooltip="Task information to be passed to subsequent nodes",
+                ),
+            ],
+        )
+
+    @classmethod
+    async def execute(
+        cls, ak, sk,
+        GLB=None, image=None, model_task=None, model=None,
+    ):
         if image is None:
             raise RuntimeError("image is required")
-        if texture:
-            request_type = 3
-        else:
-            request_type = 1
-        format = convert_format(format)    
-        image_path = toImagePath(image,"image")
+
         api, ak, sk = getHitem3dAPI(ak, sk)
-        if image_back is None and image_left is None and image_right is None:
-            result = await api.image_to_3d(
-                image_path, request_type, face, model, format, resolution
-            )
-        else:
-            multi_images = [image_path]
-            image_dict = {
-                "image_back": image_back,
-                "image_left": image_left,
-                "image_right": image_right
-            }
-            multi_images_bit="1";
-            for image_name in ["image_back", "image_left", "image_right"]:
-                image_ = image_dict[image_name]
-                if image_ is not None:
-                    image_filename = toImagePath(image_,image_name)
-                    multi_images.append(image_filename)
-                    multi_images_bit=multi_images_bit+"1"
-                else:
-                    multi_images_bit=multi_images_bit+"0"
-                    multi_images.append(None)
-            result = await api.multi_view_to_3d(multi_images,multi_images_bit,request_type, face, model, format, resolution)
-               
-        if result['status'] != 'success':
-            raise RuntimeError(f"Failed to generate mesh: {result['message']}")
-        task_id = result['task_id']
-        model_url = result['model_url']
-        model_file = download_model(model_url,task_id)
-        print("model downloaded to", model_file)
-        return model_file, {"task_id": task_id, "model_url": model_url, "ak": ak, "sk": sk}
-class PortraitImageTo3DNode:
-    DESCRIPTION = "Optimized Image-to-3D node for portraits and scenes. Supports scene-portraitv1.5 / v2.0 / v2.1 models. Resolution is automatically determined by model version."
 
-    @classmethod
-    def INPUT_TYPES(s):
-        config = {
-            "required": {
-                "ak": ("STRING", {"default": "", "tooltip": "Hitem3D API Access Key. Leave empty if configured in config.json or environment variables."}),
-                "sk": ("STRING", {"default": "", "tooltip": "Hitem3D API Secret Key. Leave empty if configured in config.json or environment variables."}),
-            },
-            "optional": {
-                "image": ("IMAGE", {"tooltip": "Front main image (Required) for portrait/scene 3D reconstruction."}),
-                "image_back": ("IMAGE", {"tooltip": "Back reference image (Optional) for multi-view reconstruction."}),
-                "image_left": ("IMAGE", {"tooltip": "Left reference image (Optional) for multi-view reconstruction."}),
-                "image_right": ("IMAGE", {"tooltip": "Right reference image (Optional) for multi-view reconstruction."}),
-                "texture": ("BOOLEAN", {"default": True, "tooltip": "Whether to generate textures. If enabled, the model will include vertex colors/textures."}),
-                "model": (["scene-portraitv1.5", "scene-portraitv2.0","scene-portraitv2.1"], {"default": "scene-portraitv1.5", "tooltip": "Portrait/Scene model version. v1.5 uses 1536, v2.0/v2.1 uses 1536pro resolution."}),
-                "face": ("INT", {"min": 100000, "max": 2000000, "default": 500000, "tooltip": "Output poly count. Higher count means finer detail but larger file size."}),
-                "format": ([ "glb", "stl","fbx","usdz"], {"default": "glb", "tooltip": "Output 3D model file format."}),
-            }
-        }
-        return config
-
-    RETURN_TYPES = ("STRING", "HITMES3D_MODEL_TASK",)
-    RETURN_NAMES = ("model_file", "model_task")
-    OUTPUT_TOOLTIPS = ("Local path to the downloaded 3D model file", "Task information to be passed to the Texture node for re-texturing")
-    FUNCTION = "generate_mesh"
-    CATEGORY = "Hitems3D"
-
-    async def generate_mesh(self, ak, sk, texture, image=None, image_back=None, image_left=None, image_right=None, model=None, face=None, format=None):
-        if image is None:
-            raise RuntimeError("image is required")
-        if texture:
-            request_type = 3
-        else:
-            request_type = 1
-        if model == "scene-portraitv1.5":
-            resolution = "1536"
-        else:
-            resolution = "1536pro"    
-        format = convert_format(format)    
-        image_path = toImagePath(image,"image")
-        api, ak, sk = getHitem3dAPI(ak, sk)
-        if image_back is None and image_left is None and image_right is None:
-            result = await api.image_to_3d(
-                image_path, request_type, face, model, format, resolution
-            )
-        else:
-            multi_images = [image_path]
-            image_dict = {
-                "image_back": image_back,
-                "image_left": image_left,
-                "image_right": image_right
-            }
-            multi_images_bit="1";
-            for image_name in ["image_back", "image_left", "image_right"]:
-                image_ = image_dict[image_name]
-                if image_ is not None:
-                    image_filename = toImagePath(image_,image_name)
-                    multi_images.append(image_filename)
-                    multi_images_bit=multi_images_bit+"1"
-                else:
-                    multi_images_bit=multi_images_bit+"0"
-                    multi_images.append(None)
-            result = await api.multi_view_to_3d(multi_images,multi_images_bit,request_type, face, model, format, resolution)
-               
-        if result['status'] != 'success':
-            raise RuntimeError(f"Failed to generate mesh: {result['message']}")
-        task_id = result['task_id']
-        model_url = result['model_url']
-        model_file = download_model(model_url,task_id)
-        print("model downloaded to", model_file)
-        return model_file, {"task_id": task_id, "model_url": model_url, "ak": ak, "sk": sk}    
-class TextrueNode:
-    DESCRIPTION = "Regenerates texture maps for existing 3D models. Provide a reference image and the original model (via path/URL or upstream node) to generate new textures."
-
-    @classmethod
-    def INPUT_TYPES(s):
-        config = {
-            "required": {
-                "ak": ("STRING", {"default": "", "tooltip": "Hitem3D API Access Key. Leave empty if configured in config.json or environment variables."}),
-                "sk": ("STRING", {"default": "", "tooltip": "Hitem3D API Secret Key. Leave empty if configured in config.json or environment variables."}),
-                # mesh_url 改为纯文本输入：既可以是本地路径，也可以是网址
-                "mesh_url": ("STRING", {"default": "", "tooltip": "Local file path or network URL of the 3D model. Can be left empty if model_task is connected."}),
-            },
-            "optional": {
-                # 可选：风格图，当前实现里没用到，保留扩展空间
-                "image": ("IMAGE", {"tooltip": "Texture reference image (Required). The model will generate a new texture map based on this image."}),
-                # 也可以直接传入前面节点输出的 model_task，做简单透传
-                "model_task": ("HITMES3D_MODEL_TASK", {"tooltip": "Task output from ImageTo3D or PortraitImageTo3D nodes. Automatically uses that model's URL if connected."}),
-                "model": (["hitem3dv1.5", "scene-portraitv1.5"], {"default": "hitem3dv1.5", "tooltip": "Model version used for texture generation."}),
-                "format": ([ "glb", "stl","fbx","usdz"], {"default": "glb", "tooltip": "Output 3D model file format."}),
-            },
-        }
-        return config
-
-    RETURN_TYPES = ("STRING", "HITMES3D_MODEL_TASK")
-    RETURN_NAMES = ("model_file", "model_task")
-    OUTPUT_TOOLTIPS = ("Local path to the downloaded 3D model file", "Task information to be passed to subsequent nodes")
-    FUNCTION = "generate_mesh"
-    CATEGORY = "Hitems3D"
-
-    async def generate_mesh(self, ak, sk, mesh_url, image=None, model_task=None, model=None,format=None):
-        if image is None:
-            raise RuntimeError("image is required")
         if model_task is not None:
             mesh_url = model_task["model_url"]
-            api, ak, sk = getHitem3dAPI(ak, sk)
-        else:  
-            if mesh_url is None or mesh_url == "":
-                raise RuntimeError("mesh_url 不能为空，可以输入本地路径或网络 URL")
-            api, ak, sk = getHitem3dAPI(ak, sk)
-            if mesh_url.startswith("http://") or mesh_url.startswith("https://"):
-                mesh_url =mesh_url;
+        elif GLB is not None:
+            if GLB.is_disk_backed:
+                mesh_path = GLB.get_source()
             else:
-                mesh_url =await api.upload_file(mesh_url)     
-        print("mesh_url:", mesh_url)    
-        format = convert_format(format)    
-        image_path = toImagePath(image,"image")
-        result = await api.texture(image_path,mesh_url, format,model)
-        if result['status'] != 'success':
+                tmp_path = os.path.join(get_input_directory(), f"_tmp_texture_input.{GLB.format or 'glb'}")
+                GLB.save_to(tmp_path)
+                mesh_path = tmp_path
+            mesh_url = await api.upload_file(mesh_path)
+        else:
+            raise RuntimeError("GLB or model_task is required")
+
+        print("mesh_url:", mesh_url)
+        image_path = toImagePath(image, "image")
+        result = await api.texture(image_path, mesh_url, model)
+
+        if result["status"] != "success":
             raise RuntimeError(f"Failed to generate mesh: {result['message']}")
-        task_id = result['task_id']
-        model_url = result['model_url']
-        model_file = download_model(model_url,task_id) 
-        return model_file, {"task_id": task_id, "model_url": model_url, "ak": ak, "sk": sk}    
+
+        task_id = result["task_id"]
+        model_url = result["model_url"]
+        glb = await download_url_to_file_3d(model_url, "glb", task_id=task_id)
+        return io.NodeOutput(
+            glb,
+            {"task_id": task_id, "model_url": model_url, "ak": ak, "sk": sk},
+        )
+
+
+class LoadGLBNode:
+    SUPPORTED_EXTENSIONS = {'.glb'}
+
+    @classmethod
+    def _scan_files(cls):
+        from pathlib import Path
+        results = []
+        for base_dir in [get_input_directory(), get_output_directory()]:
+            base = Path(base_dir)
+            if not base.exists():
+                continue
+            for f in base.rglob("*"):
+                if f.suffix.lower() in cls.SUPPORTED_EXTENSIONS:
+                    results.append(str(f.relative_to(base)).replace("\\", "/"))
+        return sorted(set(results))
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        files = cls._scan_files()
+        return {
+            "required": {
+                "model_file": (sorted(files) if files else ["(no files found)"],),
+            },
+        }
+
+    RETURN_TYPES = ("FILE_3D",)
+    RETURN_NAMES = ("model_3d",)
+    FUNCTION = "execute"
+    CATEGORY = "Hitems3D"
+    DESCRIPTION = "Load a GLB 3D model file from disk."
+
+    def execute(self, model_file):
+        from comfy_api.latest._util.geometry_types import File3D
+
+        filepath = folder_paths.get_annotated_filepath(model_file)
+        if not os.path.isfile(filepath):
+            raise RuntimeError(f"3D model file not found: {filepath}")
+        return (File3D(filepath),)
+
+
+# ── 扩展注册 ───────────────────────────────────────────────────────────
+
+
+class Hitems3DExtension(ComfyExtension):
+    @override
+    async def get_node_list(self) -> list[type[io.ComfyNode]]:
+        return [
+            ImageTo3DNode,
+            TextrueNode,
+        ]
+
+
+NODES_LIST: list[type[io.ComfyNode]] = [
+    ImageTo3DNode,
+    TextrueNode,
+]
+
 NODE_CLASS_MAPPINGS = {
     "ImageTo3DNode": ImageTo3DNode,
-    "PortraitImageTo3DNode": PortraitImageTo3DNode,
-    "TextrueNode": TextrueNode
+    "TextrueNode": TextrueNode,
+    "LoadGLBNode": LoadGLBNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageTo3DNode": "hi3d:ImageTo3D",
-    "PortraitImageTo3DNode": "hi3d:PortraitImageTo3D",
-    "TextrueNode": "hi3d:Textrue"
-
+    "TextrueNode": "hi3d:Textrue",
+    "LoadGLBNode": "hi3d:Load3DModel",
 }
+
+WEB_DIRECTORY = "./web"
+
+
+async def comfy_entrypoint() -> Hitems3DExtension:
+    return Hitems3DExtension()
