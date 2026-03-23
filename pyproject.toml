@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hitem3d"
-version = "1.0.2"
+version = "1.0.3"
 description = "ComfyUI custom nodes for Hitem3D Image-to-3D API: generate 3D models (GLB) from images."
 readme = "README.md"
 license = { text = "MIT License" }
@@ -27,3 +27,4 @@ PublisherId = "dev-hitem"
 DisplayName = "Hitem3D"
 # Optional square icon (max 400x400), e.g. raw.githubusercontent.com PNG/SVG
 Icon = "https://hitem3dstatic.zaohaowu.net/FE/static/img/20260323-171853.jpeg"
+Banner = "https://hitem3dstatic.zaohaowu.net/FE/static/img/20260323-184338.jpeg"

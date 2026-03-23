@@ -14,7 +14,7 @@ from comfy_api_nodes.util import (
     download_url_to_file_3d,
 )
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 hitem3d_ak = os.environ.get("hitem3d_ak")
 hitem3d_sk = os.environ.get("hitem3d_sk")
