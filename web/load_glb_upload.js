@@ -2,7 +2,7 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
 app.registerExtension({
-    name: "hitems3d.load_glb_upload",
+    name: "hitem3d.load_glb_upload",
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== "LoadGLBNode") {
             return;

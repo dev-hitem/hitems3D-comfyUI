@@ -16,19 +16,19 @@ from comfy_api_nodes.util import (
 
 __version__ = "1.0.0"
 
-hitems3d_ak = os.environ.get("hitems3d_ak")
-hitems3d_sk = os.environ.get("hitems3d_sk")
+hitem3d_ak = os.environ.get("hitem3d_ak")
+hitem3d_sk = os.environ.get("hitem3d_sk")
 
-if not hitems3d_ak or not hitems3d_sk:
+if not hitem3d_ak or not hitem3d_sk:
     p = os.path.dirname(os.path.realpath(__file__))
     config_path = os.path.join(p, "config.json")
     if os.path.exists(config_path):
         with open(config_path) as f:
             config = json.load(f)
-            if not hitems3d_ak:
-                hitems3d_ak = config.get("hitems3d_ak")
-            if not hitems3d_sk:
-                hitems3d_sk = config.get("hitems3d_sk")
+            if not hitem3d_ak:
+                hitem3d_ak = config.get("hitem3d_ak")
+            if not hitem3d_sk:
+                hitem3d_sk = config.get("hitem3d_sk")
 
 # ── 常量 ──────────────────────────────────────────────────────────────
 
@@ -59,14 +59,14 @@ ALL_IMAGE_TO_3D_RESOLUTIONS = ["512", "1024", "1536", "1536pro"]
 
 ALL_FORMATS = ["glb", "stl", "fbx", "usdz"]
 
-Hitems3DModelTask = io.Custom("HITMES3D_MODEL_TASK")
+Hitem3DModelTask = io.Custom("HITEM3D_MODEL_TASK")
 
 # ── 工具函数 ───────────────────────────────────────────────────────────
 
 
 def getHitem3dAPI(ak: str, sk: str):
-    ak = hitems3d_ak if hitems3d_ak else ak
-    sk = hitems3d_sk if hitems3d_sk else sk
+    ak = hitem3d_ak if hitem3d_ak else ak
+    sk = hitem3d_sk if hitem3d_sk else sk
     if not ak:
         raise RuntimeError("ak is required")
     if not sk:
@@ -207,8 +207,8 @@ class ImageTo3DNode(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="ImageTo3DNode",
-            display_name="hi3d:ImageTo3D",
-            category="Hitems3D",
+            display_name="hitem3d:ImageTo3D",
+            category="Hitem3D",
             description=(
                 "Generates a 3D model from a single or multi-view image. "
                 "Use `scene` to switch between general object models and portrait/scene models. "
@@ -264,7 +264,7 @@ class ImageTo3DNode(io.ComfyNode):
                 io.File3DGLB.Output(
                     display_name="GLB",
                 ),
-                Hitems3DModelTask.Output(
+                Hitem3DModelTask.Output(
                     display_name="model_task",
                     tooltip="Task information to be passed to the Texture node for re-texturing",
                 ),
@@ -287,13 +287,13 @@ class ImageTo3DNode(io.ComfyNode):
         return io.NodeOutput(glb, task_info)
 
 
-class TextrueNode(io.ComfyNode):
+class TextureNode(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id="TextrueNode",
-            display_name="hi3d:Textrue",
-            category="Hitems3D",
+            node_id="TextureNode",
+            display_name="hitem3d:Texture",
+            category="Hitem3D",
             description=(
                 "Regenerates texture maps for existing 3D models. "
                 "Provide a reference image and the original model (via path/URL or upstream node) "
@@ -318,7 +318,7 @@ class TextrueNode(io.ComfyNode):
                     "image", optional=True,
                     tooltip="Texture reference image (Required). The model will generate a new texture map based on this image.",
                 ),
-                Hitems3DModelTask.Input(
+                Hitem3DModelTask.Input(
                     "model_task", optional=True,
                     tooltip="Task output from ImageTo3D nodes. Automatically uses that model's URL if connected.",
                 ),
@@ -333,7 +333,7 @@ class TextrueNode(io.ComfyNode):
                 io.File3DGLB.Output(
                     display_name="GLB",
                 ),
-                Hitems3DModelTask.Output(
+                Hitem3DModelTask.Output(
                     display_name="model_task",
                     tooltip="Task information to be passed to subsequent nodes",
                 ),
@@ -407,7 +407,7 @@ class LoadGLBNode:
     RETURN_TYPES = ("FILE_3D",)
     RETURN_NAMES = ("model_3d",)
     FUNCTION = "execute"
-    CATEGORY = "Hitems3D"
+    CATEGORY = "Hitem3D"
     DESCRIPTION = "Load a GLB 3D model file from disk."
 
     def execute(self, model_file):
@@ -422,34 +422,34 @@ class LoadGLBNode:
 # ── 扩展注册 ───────────────────────────────────────────────────────────
 
 
-class Hitems3DExtension(ComfyExtension):
+class Hitem3DExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         return [
             ImageTo3DNode,
-            TextrueNode,
+            TextureNode,
         ]
 
 
 NODES_LIST: list[type[io.ComfyNode]] = [
     ImageTo3DNode,
-    TextrueNode,
+    TextureNode,
 ]
 
 NODE_CLASS_MAPPINGS = {
     "ImageTo3DNode": ImageTo3DNode,
-    "TextrueNode": TextrueNode,
+    "TextureNode": TextureNode,
     "LoadGLBNode": LoadGLBNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ImageTo3DNode": "hi3d:ImageTo3D",
-    "TextrueNode": "hi3d:Textrue",
-    "LoadGLBNode": "hi3d:Load3DModel",
+    "ImageTo3DNode": "hitem3d:ImageTo3D",
+    "TextureNode": "hitem3d:Texture",
+    "LoadGLBNode": "hitem3d:Load3DModel",
 }
 
 WEB_DIRECTORY = "./web"
 
 
-async def comfy_entrypoint() -> Hitems3DExtension:
-    return Hitems3DExtension()
+async def comfy_entrypoint() -> Hitem3DExtension:
+    return Hitem3DExtension()

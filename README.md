@@ -1,4 +1,4 @@
-# hitems3D-comfyUI
+# hitem3d-comfyUI
 
 ComfyUI custom node package for [Hitem3D](https://www.hitem3d.ai/) Image-to-3D API. Generate high-quality 3D models from images using Hitem3D AI services.
 
@@ -14,18 +14,18 @@ ComfyUI custom node package for [Hitem3D](https://www.hitem3d.ai/) Image-to-3D A
 
 ### Download from Hitem3D Website
 
-1. Download the `hitems3D-comfyUI` archive from the [Hitem3D website](https://www.hitem3d.ai/) or the project releases page.
+1. Download the `hitem3d-comfyUI` archive from the [Hitem3D website](https://www.hitem3d.ai/) or the project releases page.
 2. Extract it into the `ComfyUI/custom_nodes` directory.
 3. Install Python dependencies via the **ComfyUI built-in terminal** (click the terminal icon in the ComfyUI Manager toolbar) or any terminal with the same Python environment:
 
 ```bash
-cd ComfyUI/custom_nodes/hitems3D-comfyUI
+cd ComfyUI/custom_nodes/hitem3d-comfyUI
 pip install -r requirements.txt
 ```
 
 ### ComfyUI Manager
 
-Search for `hitems3D` in [ComfyUI Manager](https://github.com/ltdrdata/ComfyUI-Manager) and install it directly.
+Search for `hitem3d` in [ComfyUI Manager](https://github.com/ltdrdata/ComfyUI-Manager) and install it directly.
 
 ## Configuration
 
@@ -37,23 +37,23 @@ Edit `config.json` in the node directory:
 
 ```json
 {
-    "hitems3d_ak": "your_access_key",
-    "hitems3d_sk": "your_secret_key"
+    "hitem3d_ak": "your_access_key",
+    "hitem3d_sk": "your_secret_key"
 }
 ```
 
 ### Option 2: Environment Variables
 
 ```bash
-export hitems3d_ak=your_access_key
-export hitems3d_sk=your_secret_key
+export hitem3d_ak=your_access_key
+export hitem3d_sk=your_secret_key
 ```
 
 > If ak/sk are configured via `config.json` or environment variables, the input fields on the nodes can be left empty.
 
 ## Nodes
 
-### hi3d:ImageTo3D
+### hitem3d:ImageTo3D
 
 Generates a 3D model (GLB) from a single image or multi-view images.
 
@@ -93,11 +93,11 @@ Generates a 3D model (GLB) from a single image or multi-view images.
 | Output | Type | Description |
 |--------|------|-------------|
 | `GLB` | FILE3DGLB | Downloaded 3D model in GLB format |
-| `model_task` | HITMES3D_MODEL_TASK | Task info, can be passed to the Texture node |
+| `model_task` | HITEM3D_MODEL_TASK | Task info, can be passed to the Texture node |
 
 ---
 
-### hi3d:Texture
+### hitem3d:Texture
 
 Regenerates texture maps for an existing 3D model based on a reference image.
 
@@ -107,7 +107,7 @@ Regenerates texture maps for an existing 3D model based on a reference image.
 | `sk` | STRING | API Secret Key (leave empty if configured globally) |
 | `GLB` | FILE3DGLB | Input 3D model in GLB format |
 | `image` | IMAGE | Texture reference image (**required**) |
-| `model_task` | HITMES3D_MODEL_TASK | Upstream task info from ImageTo3D (optional) |
+| `model_task` | HITEM3D_MODEL_TASK | Upstream task info from ImageTo3D (optional) |
 | `model` | COMBO | Model version: `hitem3dv1.5` / `scene-portraitv1.5` |
 
 > Provide either `model_task` **or** `GLB`. When `model_task` is connected, its model URL is used automatically without re-uploading.
@@ -116,7 +116,7 @@ Regenerates texture maps for an existing 3D model based on a reference image.
 
 ---
 
-### hi3d:Load3DModel
+### hitem3d:Load3DModel
 
 Loads a GLB file from disk for use with the Texture node. Includes an **Upload GLB File** button to browse and upload files from your local computer.
 

@@ -45,7 +45,7 @@ function wrapWidgetCallback(widget, onChange) {
 }
 
 app.registerExtension({
-    name: "hitems3d.image_to_3d_linkage",
+    name: "hitem3d.image_to_3d_linkage",
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== "ImageTo3DNode") {
             return;
