@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hitem3d"
-version = "1.0.5"
+version = "1.0.6"
 description = "ComfyUI custom nodes for Hitem3D Image-to-3D API: generate 3D models (GLB) from images."
 readme = "README.md"
 license = { text = "MIT License" }

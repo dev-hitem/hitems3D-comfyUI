@@ -2,11 +2,54 @@ import asyncio
 import base64
 from contextlib import ExitStack
 from datetime import datetime
+import importlib
+import importlib.util
 import json
 import mimetypes
 import os
+import subprocess
+import sys
 import uuid
 
+
+def _import_dependencies():
+    dependencies = ["tos", "aiohttp"]
+    missing = [dep for dep in dependencies if importlib.util.find_spec(dep) is None]
+
+    if not missing:
+        return
+
+    print(f"### [Hitem3D] Installing missing dependencies for ComfyUI: {missing}...")
+
+    index_url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+    attempts = [
+        [sys.executable, "-m", "pip", "install", *missing, "-i", index_url],
+        [sys.executable, "-m", "pip", "install", *missing],
+        [sys.executable, "-m", "pip", "install", "--user", *missing],
+    ]
+
+    success = False
+    for cmd in attempts:
+        try:
+            result = subprocess.run(cmd, check=False)
+            if result.returncode == 0:
+                success = True
+                break
+        except Exception:
+            pass
+
+    if success:
+        importlib.invalidate_caches()
+        return
+
+    raise RuntimeError(
+        f"Failed to auto-install {missing}. Run manually in a terminal:\n"
+        f'"{sys.executable}" -m pip install {" ".join(missing)}'
+    )
+
+
+_import_dependencies()
 import aiohttp
 import tos
 from comfy.model_management import throw_exception_if_processing_interrupted

@@ -14,7 +14,7 @@ from comfy_api_nodes.util import (
     download_url_to_file_3d,
 )
 
-__version__ = "1.0.5"
+__version__ = "1.0.6"
 
 hitem3d_ak = os.environ.get("hitem3d_ak")
 hitem3d_sk = os.environ.get("hitem3d_sk")
@@ -30,7 +30,7 @@ if not hitem3d_ak or not hitem3d_sk:
             if not hitem3d_sk:
                 hitem3d_sk = config.get("hitem3d_sk")
 
-# ── 常量 ──────────────────────────────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────
 
 IMAGE_TO_3D_SCENE_MODELS = {
     "general": ["hitem3dv1.5", "hitem3dv2.0"],
@@ -61,7 +61,7 @@ ALL_FORMATS = ["glb", "stl", "fbx", "usdz"]
 
 Hitem3DModelTask = io.Custom("HITEM3D_MODEL_TASK")
 
-# ── 工具函数 ───────────────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────
 
 
 def getHitem3dAPI(ak: str, sk: str):
@@ -200,7 +200,7 @@ async def run_image_to_3d_task(
     return glb, {"task_id": task_id, "model_url": model_url, "ak": ak, "sk": sk}
 
 
-# ── 节点定义 ───────────────────────────────────────────────────────────
+# ── Node definitions ─────────────────────────────────────────────────────
 
 class ImageTo3DNode(io.ComfyNode):
     @classmethod
@@ -423,7 +423,7 @@ class LoadGLBNode:
         return (File3D(filepath),)
 
 
-# ── 扩展注册 ───────────────────────────────────────────────────────────
+# ── Extension registration ───────────────────────────────────────────────
 
 
 class Hitem3DExtension(ComfyExtension):
